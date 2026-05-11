@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "tsx api/index.ts",
     "init-db": "tsx scripts/init-db.ts",
-    "build": "tsc"
+    "build:tsc": "tsc"
   },
   "dependencies": {
     "@vercel/blob": "^2.3.3",
