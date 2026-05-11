@@ -64,6 +64,12 @@ app.post("/api/auth/otp/send", async (req, res) => {
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
   try {
+    // Check if user already exists
+    const [existingUser] = await sql`SELECT uid FROM hub_users WHERE email = ${email}`;
+    if (existingUser) {
+      return res.status(400).json({ error: "An account with this email already exists" });
+    }
+
     // Clear old OTPs for this email
     await sql`DELETE FROM hub_otps WHERE email = ${email}`;
     
@@ -72,6 +78,14 @@ app.post("/api/auth/otp/send", async (req, res) => {
       INSERT INTO hub_otps (email, otp, expires_at)
       VALUES (${email}, ${otp}, ${expiresAt})
     `;
+
+    console.log(`[AUTH] OTP for ${email}: ${otp}`);
+    
+    // If no email credentials, just succeed with console log
+    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+      console.warn("[AUTH] Email credentials missing. OTP only available in console.");
+      return res.json({ success: true, emailSent: false });
+    }
 
     // Send email
     await transporter.sendMail({
