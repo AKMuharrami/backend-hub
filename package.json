@@ -3,8 +3,8 @@
   "version": "1.0.0",
   "main": "api/index.ts",
   "scripts": {
-    "dev": "tsx api/index.ts",
-    "init-db": "tsx scripts/init-db.ts",
+    "dev": "npx tsx api/index.ts",
+    "init-db": "npx tsx scripts/init-db.ts",
     "build:tsc": "tsc"
   },
   "dependencies": {
