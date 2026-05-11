@@ -6,6 +6,7 @@ import jwt from "jsonwebtoken";
 import cors from "cors";
 import dotenv from "dotenv";
 import multer from "multer";
+import nodemailer from "nodemailer";
 
 dotenv.config();
 
@@ -43,6 +44,84 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "ok", time: new Date().toISOString() });
 });
 
+// Nodemailer transporter
+const transporter = nodemailer.createTransport({
+  host: process.env.EMAIL_HOST || 'smtp.gmail.com',
+  port: parseInt(process.env.EMAIL_PORT || '587'),
+  secure: process.env.EMAIL_PORT === '465',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
+
+// OTP Routes
+app.post("/api/auth/otp/send", async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ error: "Email is required" });
+
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+  try {
+    // Clear old OTPs for this email
+    await sql`DELETE FROM hub_otps WHERE email = ${email}`;
+    
+    // Save new OTP
+    await sql`
+      INSERT INTO hub_otps (email, otp, expires_at)
+      VALUES (${email}, ${otp}, ${expiresAt})
+    `;
+
+    // Send email
+    await transporter.sendMail({
+      from: process.env.EMAIL_FROM || '"Oman Delivery Hub" <noreply@omandeliveryhub.com>',
+      to: email,
+      subject: "Your Verification Code - Oman Delivery Hub",
+      text: `Your verification code is: ${otp}. It will expire in 10 minutes.`,
+      html: `
+        <div style="font-family: sans-serif; padding: 20px; color: #333;">
+          <h2 style="color: #000;">Email Verification</h2>
+          <p>Welcome to Oman Delivery Hub!</p>
+          <p>Your verification code is:</p>
+          <div style="font-size: 32px; font-weight: bold; padding: 10px; background: #f4f4f4; border-radius: 5px; display: inline-block;">
+            ${otp}
+          </div>
+          <p>This code will expire in 10 minutes.</p>
+          <p>If you didn't request this, you can safely ignore this email.</p>
+        </div>
+      `,
+    });
+
+    res.json({ success: true });
+  } catch (error: any) {
+    console.error("Failed to send OTP:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post("/api/auth/otp/verify", async (req, res) => {
+  const { email, otp } = req.body;
+  if (!email || !otp) return res.status(400).json({ error: "Email and OTP are required" });
+
+  try {
+    const [record] = await sql`
+      SELECT * FROM hub_otps WHERE email = ${email} AND otp = ${otp} AND expires_at > NOW()
+    `;
+
+    if (!record) {
+      return res.status(400).json({ error: "Invalid or expired OTP" });
+    }
+
+    // Delete OTP after successful verification
+    await sql`DELETE FROM hub_otps WHERE email = ${email}`;
+
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.post("/api/upload", authenticateToken, upload.single('file'), async (req: any, res) => {
   if (!req.file) {
     return res.status(400).json({ error: "No file uploaded" });
@@ -71,7 +150,8 @@ app.post("/api/auth/register", async (req, res) => {
     const [user] = await sql`
       INSERT INTO hub_users (uid, email, password, display_name, role, phone_number, business_name, service_governorate)
       VALUES (${uid}, ${email}, ${hashedPassword}, ${displayName}, ${role}, ${phoneNumber}, ${businessName}, ${serviceGovernorate})
-      RETURNING uid, email, display_name, role, phone_number, business_name, service_governorate
+      RETURNING uid, email, display_name as "displayName", role, phone_number as "phoneNumber", 
+                business_name as "businessName", service_governorate as "serviceGovernorate"
     `;
 
     const token = jwt.sign({ uid: user.uid, email: user.email }, JWT_SECRET);
@@ -95,8 +175,18 @@ app.post("/api/auth/login", async (req, res) => {
 
     const token = jwt.sign({ uid: user.uid, email: user.email }, JWT_SECRET);
     
-    const { password: _, ...userWithoutPassword } = user;
-    res.json({ token, user: userWithoutPassword });
+    const userProfile = {
+      uid: user.uid,
+      email: user.email,
+      displayName: user.display_name,
+      role: user.role,
+      phoneNumber: user.phone_number,
+      businessName: user.business_name,
+      serviceGovernorate: user.service_governorate,
+      createdAt: user.created_at
+    };
+    
+    res.json({ token, user: userProfile });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
