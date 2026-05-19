@@ -55,27 +55,32 @@ const transporter = nodemailer.createTransport({
   },
 });
 
+const isValidEmail = (email: string) => {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+};
+
 // OTP Routes
 app.post("/api/auth/otp/send", async (req, res) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ error: "Email is required" });
+  if (!isValidEmail(email)) return res.status(400).json({ error: "Invalid email format" });
 
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
   try {
     // Check if user already exists
-    const [existingUser] = await sql`SELECT uid FROM hub_users WHERE email = ${email}`;
+    const [existingUser] = await sql`SELECT uid FROM odh_v1_users WHERE email = ${email}`;
     if (existingUser) {
       return res.status(400).json({ error: "An account with this email already exists" });
     }
 
     // Clear old OTPs for this email
-    await sql`DELETE FROM hub_otps WHERE email = ${email}`;
+    await sql`DELETE FROM odh_v1_otps WHERE email = ${email}`;
     
     // Save new OTP
     await sql`
-      INSERT INTO hub_otps (email, otp, expires_at)
+      INSERT INTO odh_v1_otps (email, otp, expires_at)
       VALUES (${email}, ${otp}, ${expiresAt})
     `;
 
@@ -120,7 +125,7 @@ app.post("/api/auth/otp/verify", async (req, res) => {
 
   try {
     const [record] = await sql`
-      SELECT * FROM hub_otps WHERE email = ${email} AND otp = ${otp} AND expires_at > NOW()
+      SELECT * FROM odh_v1_otps WHERE email = ${email} AND otp = ${otp} AND expires_at > NOW()
     `;
 
     if (!record) {
@@ -128,7 +133,7 @@ app.post("/api/auth/otp/verify", async (req, res) => {
     }
 
     // Delete OTP after successful verification
-    await sql`DELETE FROM hub_otps WHERE email = ${email}`;
+    await sql`DELETE FROM odh_v1_otps WHERE email = ${email}`;
 
     res.json({ success: true });
   } catch (error: any) {
@@ -157,12 +162,25 @@ app.post("/api/upload", authenticateToken, upload.single('file'), async (req: an
 app.post("/api/auth/register", async (req, res) => {
   const { email, password, displayName, role, phoneNumber, businessName, serviceGovernorate } = req.body;
   console.log(`Registration attempt for: ${email}`);
+
+  if (!email || !password || !displayName || !role) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
+
+  if (password.length < 6) {
+    return res.status(400).json({ error: "Password must be at least 6 characters" });
+  }
+
+  if (!isValidEmail(email)) {
+    return res.status(400).json({ error: "Invalid email format" });
+  }
+
   try {
     const hashedPassword = bcrypt.hashSync(password, 10);
     const uid = Math.random().toString(36).substring(2, 15);
     
     const [user] = await sql`
-      INSERT INTO hub_users (uid, email, password, display_name, role, phone_number, business_name, service_governorate)
+      INSERT INTO odh_v1_users (uid, email, password, display_name, role, phone_number, business_name, service_governorate)
       VALUES (${uid}, ${email}, ${hashedPassword}, ${displayName}, ${role}, ${phoneNumber}, ${businessName}, ${serviceGovernorate})
       RETURNING uid, email, display_name as "displayName", role, phone_number as "phoneNumber", 
                 business_name as "businessName", service_governorate as "serviceGovernorate"
@@ -180,7 +198,7 @@ app.post("/api/auth/login", async (req, res) => {
   console.log(`Login attempt for: ${email}`);
   try {
     const [user] = await sql`
-      SELECT * FROM hub_users WHERE email = ${email}
+      SELECT * FROM odh_v1_users WHERE email = ${email}
     `;
     if (!user) return res.status(400).json({ error: "User not found" });
 
@@ -211,7 +229,7 @@ app.get("/api/auth/me", authenticateToken, async (req: any, res) => {
     const [user] = await sql`
       SELECT uid, email, display_name as "displayName", role, phone_number as "phoneNumber", 
              business_name as "businessName", service_governorate as "serviceGovernorate"
-      FROM hub_users WHERE uid = ${req.user.uid}
+      FROM odh_v1_users WHERE uid = ${req.user.uid}
     `;
     res.json(user);
   } catch (error: any) {
@@ -222,13 +240,13 @@ app.get("/api/auth/me", authenticateToken, async (req: any, res) => {
 // Users Routes
 app.get("/api/users", authenticateToken, async (req: any, res) => {
   try {
-    const [admin] = await sql`SELECT role FROM hub_users WHERE uid = ${req.user.uid}`;
+    const [admin] = await sql`SELECT role FROM odh_v1_users WHERE uid = ${req.user.uid}`;
     if (admin.role !== 'admin') return res.sendStatus(403);
 
     const users = await sql`
       SELECT uid, email, display_name as "displayName", role, phone_number as "phoneNumber", 
              business_name as "businessName", service_governorate as "serviceGovernorate", created_at as "createdAt"
-      FROM hub_users ORDER BY created_at DESC
+      FROM odh_v1_users ORDER BY created_at DESC
     `;
     res.json(users);
   } catch (error: any) {
@@ -241,7 +259,7 @@ app.get("/api/users/:uid", authenticateToken, async (req, res) => {
     const [user] = await sql`
       SELECT uid, email, display_name as "displayName", role, phone_number as "phoneNumber", 
              business_name as "businessName", service_governorate as "serviceGovernorate"
-      FROM hub_users WHERE uid = ${req.params.uid}
+      FROM odh_v1_users WHERE uid = ${req.params.uid}
     `;
     res.json(user);
   } catch (error: any) {
@@ -252,7 +270,7 @@ app.get("/api/users/:uid", authenticateToken, async (req, res) => {
 app.patch("/api/users/:uid", authenticateToken, async (req: any, res) => {
   const data = req.body;
   try {
-    const [requester] = await sql`SELECT role FROM hub_users WHERE uid = ${req.user.uid}`;
+    const [requester] = await sql`SELECT role FROM odh_v1_users WHERE uid = ${req.user.uid}`;
     if (req.user.uid !== req.params.uid && requester.role !== 'admin') {
       return res.sendStatus(403);
     }
@@ -264,7 +282,7 @@ app.patch("/api/users/:uid", authenticateToken, async (req: any, res) => {
     if (data.displayName) updates.display_name = data.displayName;
 
     await sql`
-      UPDATE hub_users SET ${sql(updates)} WHERE uid = ${req.params.uid}
+      UPDATE odh_v1_users SET ${sql(updates)} WHERE uid = ${req.params.uid}
     `;
     res.json({ success: true });
   } catch (error: any) {
@@ -276,15 +294,15 @@ app.patch("/api/users/:uid", authenticateToken, async (req: any, res) => {
 app.get("/api/deliveries", authenticateToken, async (req: any, res) => {
   try {
     const { uid } = req.user;
-    const [user] = await sql`SELECT role FROM hub_users WHERE uid = ${uid}`;
+    const [user] = await sql`SELECT role FROM odh_v1_users WHERE uid = ${uid}`;
     
     let deliveries;
     if (user.role === 'admin') {
-      deliveries = await sql`SELECT * FROM hub_deliveries ORDER BY created_at DESC`;
+      deliveries = await sql`SELECT * FROM odh_v1_deliveries ORDER BY created_at DESC`;
     } else if (user.role === 'business') {
-      deliveries = await sql`SELECT * FROM hub_deliveries WHERE business_id = ${uid} ORDER BY created_at DESC`;
+      deliveries = await sql`SELECT * FROM odh_v1_deliveries WHERE business_id = ${uid} ORDER BY created_at DESC`;
     } else {
-      deliveries = await sql`SELECT * FROM hub_deliveries ORDER BY created_at DESC`;
+      deliveries = await sql`SELECT * FROM odh_v1_deliveries ORDER BY created_at DESC`;
     }
     
     const transformed = deliveries.map(d => ({
@@ -321,7 +339,7 @@ app.post("/api/deliveries", authenticateToken, async (req: any, res) => {
   const id = Math.random().toString(36).substring(2, 15);
   try {
     await sql`
-      INSERT INTO hub_deliveries (
+      INSERT INTO odh_v1_deliveries (
         id, business_id, business_name, status, payment_status, receipt_url, governorate, 
         pickup_address, pickup_lat, pickup_lng, dropoff_address, dropoff_lat, dropoff_lng,
         customer_name, customer_phone, item_description, price
@@ -351,7 +369,7 @@ app.patch("/api/deliveries/:id", authenticateToken, async (req, res) => {
     updates.updated_at = new Date();
 
     await sql`
-      UPDATE hub_deliveries SET ${sql(updates)} WHERE id = ${req.params.id}
+      UPDATE odh_v1_deliveries SET ${sql(updates)} WHERE id = ${req.params.id}
     `;
     res.json({ success: true });
   } catch (error: any) {

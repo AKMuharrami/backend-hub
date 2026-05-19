@@ -17,7 +17,7 @@ async function initDb() {
   console.log("Initializing database...");
   try {
     await sql`
-      CREATE TABLE IF NOT EXISTS hub_users (
+      CREATE TABLE IF NOT EXISTS odh_v1_users (
         uid TEXT PRIMARY KEY,
         email TEXT UNIQUE NOT NULL,
         password TEXT NOT NULL,
@@ -31,11 +31,11 @@ async function initDb() {
     `;
 
     await sql`
-      CREATE TABLE IF NOT EXISTS hub_deliveries (
+      CREATE TABLE IF NOT EXISTS odh_v1_deliveries (
         id TEXT PRIMARY KEY,
-        business_id TEXT REFERENCES hub_users(uid),
+        business_id TEXT REFERENCES odh_v1_users(uid),
         business_name TEXT,
-        delivery_guy_id TEXT REFERENCES hub_users(uid),
+        delivery_guy_id TEXT REFERENCES odh_v1_users(uid),
         delivery_guy_name TEXT,
         delivery_guy_phone TEXT,
         status TEXT NOT NULL,
@@ -57,7 +57,7 @@ async function initDb() {
       )
     `;
     await sql`
-      CREATE TABLE IF NOT EXISTS hub_otps (
+      CREATE TABLE IF NOT EXISTS odh_v1_otps (
         id SERIAL PRIMARY KEY,
         email TEXT NOT NULL,
         otp TEXT NOT NULL,
